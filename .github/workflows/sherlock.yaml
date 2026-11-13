@@ -1,0 +1,182 @@
+name: Sherlock Username Search
+
+on:
+  push:
+    paths:
+      - "usernames.txt"
+
+  # 也允许在 Actions 页面手动重新运行
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sherlock-search
+  cancel-in-progress: true
+
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Validate usernames
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+
+          source = Path("usernames.txt")
+          output = Path("validated-usernames.txt")
+
+          if not source.exists():
+              print("错误：仓库根目录没有 usernames.txt")
+              sys.exit(1)
+
+          usernames = []
+          seen = set()
+
+          for line_number, raw_line in enumerate(
+              source.read_text(encoding="utf-8-sig").splitlines(),
+              start=1
+          ):
+              username = raw_line.strip()
+
+              # 忽略空行和以 # 开头的注释
+              if not username or username.startswith("#"):
+                  continue
+
+              # 允许字母、数字、下划线、横线、点和 Sherlock 的 {?}
+              if not re.fullmatch(r"[A-Za-z0-9_.?{}-]{1,64}", username):
+                  print(
+                      f"错误：第 {line_number} 行用户名格式不正确："
+                      f"{username!r}"
+                  )
+                  sys.exit(1)
+
+              if username not in seen:
+                  usernames.append(username)
+                  seen.add(username)
+
+          if not usernames:
+              print("错误：usernames.txt 中没有有效用户名")
+              sys.exit(1)
+
+          if len(usernames) > 10:
+              print(
+                  f"错误：共有 {len(usernames)} 个用户名，"
+                  "一次最多查询 10 个"
+              )
+              sys.exit(1)
+
+          output.write_text(
+              "\n".join(usernames) + "\n",
+              encoding="utf-8"
+          )
+
+          print("准备查询：")
+          for username in usernames:
+              print(f"- {username}")
+          PY
+
+      - name: Install Sherlock
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install sherlock-project
+          sherlock --version
+
+      - name: Run Sherlock
+        shell: bash
+        run: |
+          set -o pipefail
+
+          rm -rf results
+          mkdir -p results
+
+          mapfile -t USERNAMES < validated-usernames.txt
+
+          sherlock "${USERNAMES[@]}" \
+            --folderoutput results \
+            --print-found \
+            --csv \
+            --xlsx \
+            --txt \
+            --timeout 20 \
+            2>&1 | tee results/run.log
+
+      - name: Create result files
+        if: always()
+        shell: bash
+        run: |
+          rm -f sherlock-results.txt sherlock-results.zip
+
+          {
+            echo "Sherlock 查询结果"
+            echo "================="
+            echo
+            echo "查询时间：$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo
+            echo "查询用户名"
+            echo "------------"
+
+            if [ -f validated-usernames.txt ]; then
+              sed 's/^/- /' validated-usernames.txt
+            else
+              echo "- 用户名验证失败"
+            fi
+
+            echo
+            echo "完整运行日志"
+            echo "------------"
+            echo
+
+            if [ -f results/run.log ]; then
+              cat results/run.log
+            else
+              echo "没有生成运行日志，请查看 GitHub Actions 运行记录。"
+            fi
+          } > sherlock-results.txt
+
+          if [ -d results ]; then
+            cp usernames.txt results/input-usernames.txt
+            zip -r -q sherlock-results.zip results
+          fi
+
+      - name: Commit and overwrite results
+        if: always()
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add sherlock-results.txt
+
+          if [ -f sherlock-results.zip ]; then
+            git add sherlock-results.zip
+          fi
+
+          if git diff --cached --quiet; then
+            echo "结果没有变化，无需提交。"
+            exit 0
+          fi
+
+          git commit -m "Update Sherlock search results"
+
+          # 防止运行期间出现新的提交
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
