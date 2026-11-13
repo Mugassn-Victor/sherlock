@@ -1,13 +1,24 @@
 Sherlock 查询结果
 =================
 
-查询时间：2026-11-13 18:20:25 UTC
+查询时间：2026-11-13 18:22:35 UTC
 
 查询用户名
 ------------
-- 用户名验证失败
+- wynhy_
 
 完整运行日志
 ------------
 
-没有生成运行日志，请查看 Actions 运行记录。
+[*] Checking username wynhy_ on:
+
+[+] Chess: https://www.chess.com/member/wynhy_
+[+] Minecraft: https://api.mojang.com/users/profiles/minecraft/wynhy_
+[+] TikTok: https://www.tiktok.com/@wynhy_
+[+] Wattpad: https://www.wattpad.com/user/wynhy_
+[+] omg.lol: https://wynhy_.omg.lol
+
+[*] Search completed with 5 results
+
+Go deeper than a username. Explore public profiles and export your findings.
+Try OSINTSearch: ]8;;https://osintsearch.org/go/sherlock\https://osintsearch.org]8;;\
