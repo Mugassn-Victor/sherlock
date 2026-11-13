@@ -5,14 +5,14 @@ on:
     paths:
       - "usernames.txt"
 
-  # 也允许在 Actions 页面手动重新运行
+  # 保留手动运行按钮，方便测试
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: sherlock-search
+  group: sherlock-search-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -30,7 +30,6 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-          cache: "pip"
 
       - name: Validate usernames
         shell: bash
@@ -56,14 +55,14 @@ jobs:
           ):
               username = raw_line.strip()
 
-              # 忽略空行和以 # 开头的注释
+              # 忽略空行和注释
               if not username or username.startswith("#"):
                   continue
 
-              # 允许字母、数字、下划线、横线、点和 Sherlock 的 {?}
+              # 允许常见用户名字符和 Sherlock 的 {?} 变体写法
               if not re.fullmatch(r"[A-Za-z0-9_.?{}-]{1,64}", username):
                   print(
-                      f"错误：第 {line_number} 行用户名格式不正确："
+                      f"错误：第 {line_number} 行格式不正确："
                       f"{username!r}"
                   )
                   sys.exit(1)
@@ -88,12 +87,13 @@ jobs:
               encoding="utf-8"
           )
 
-          print("准备查询：")
+          print("准备查询以下用户名：")
           for username in usernames:
               print(f"- {username}")
           PY
 
       - name: Install Sherlock
+        shell: bash
         run: |
           python -m pip install --upgrade pip
           python -m pip install sherlock-project
@@ -118,7 +118,7 @@ jobs:
             --timeout 20 \
             2>&1 | tee results/run.log
 
-      - name: Create result files
+      - name: Create fixed result files
         if: always()
         shell: bash
         run: |
@@ -147,12 +147,15 @@ jobs:
             if [ -f results/run.log ]; then
               cat results/run.log
             else
-              echo "没有生成运行日志，请查看 GitHub Actions 运行记录。"
+              echo "没有生成运行日志，请查看 Actions 运行记录。"
             fi
           } > sherlock-results.txt
 
           if [ -d results ]; then
-            cp usernames.txt results/input-usernames.txt
+            if [ -f usernames.txt ]; then
+              cp usernames.txt results/input-usernames.txt
+            fi
+
             zip -r -q sherlock-results.zip results
           fi
 
@@ -171,12 +174,11 @@ jobs:
           fi
 
           if git diff --cached --quiet; then
-            echo "结果没有变化，无需提交。"
+            echo "结果没有发生变化，无需提交。"
             exit 0
           fi
 
-          git commit -m "Update Sherlock search results"
+          git commit -m "Update Sherlock search results [skip ci]"
 
-          # 防止运行期间出现新的提交
           git pull --rebase origin "${GITHUB_REF_NAME}"
           git push origin "HEAD:${GITHUB_REF_NAME}"
